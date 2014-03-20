@@ -20,8 +20,12 @@ To list available commands, either run ``docker`` with no parameters or execute
 
 .. _cli_options:
 
-Types of Options
-----------------
+Options
+-------
+
+Single character commandline options can be combined, so rather than typing
+``docker run -t -i --name test busybox sh``, you can write
+``docker run -ti --name test busybox sh``.
 
 Boolean
 ~~~~~~~
@@ -67,6 +71,7 @@ Commands
     Usage of docker:
       -D, --debug=false: Enable debug mode
       -H, --host=[]: Multiple tcp://host:port or unix://path/to/socket to bind in daemon mode, single connection otherwise. systemd socket activation can be used with fd://[socketfd].
+      -G, --group="docker": Group to assign the unix socket specified by -H when running in daemon mode; use '' (the empty string) to disable setting of a group
       --api-enable-cors=false: Enable CORS headers in the remote API
       -b, --bridge="": Attach containers to a pre-existing network bridge; use 'none' to disable container networking
       --bip="": Use this CIDR notation address for the network bridge's IP, not compatible with -b
@@ -79,7 +84,7 @@ Commands
       -p, --pidfile="/var/run/docker.pid": Path to use for daemon PID file
       -r, --restart=true: Restart previously running containers
       -s, --storage-driver="": Force the docker runtime to use a specific storage driver
-      -e, --exec-driver="": Force the docker runtime to use a specific exec driver
+      -e, --exec-driver="native": Force the docker runtime to use a specific exec driver
       -v, --version=false: Print version information and quit
       --mtu=0: Set the containers network MTU; if no value is provided: default to the default route MTU or 1500 if no default route is available
 
@@ -91,6 +96,8 @@ To force Docker to use devicemapper as the storage driver, use ``docker -d -s de
 To set the DNS server for all Docker containers, use ``docker -d -dns 8.8.8.8``.
 
 To run the daemon with debug output, use ``docker -d -D``.
+
+To use lxc as the execution driver, use ``docker -d -e lxc``.
 
 The docker client will also honor the ``DOCKER_HOST`` environment variable to set
 the ``-H`` flag for the client.  
@@ -108,11 +115,15 @@ Using ``fd://`` will work perfectly for most setups but you can also specify ind
 If the specified socket activated files aren't found then docker will exit.
 You can find examples of using systemd socket activation with docker and systemd in the `docker source tree <https://github.com/dotcloud/docker/blob/master/contrib/init/systemd/socket-activation/>`_.
 
-.. warning::
-  Docker and LXC do not support the use of softlinks for either the Docker data directory (``/var/lib/docker``) or for ``/tmp``.
-  If your system is likely to be set up in that way, you can use ``readlink -f`` to canonicalise the links:
+Docker supports softlinks for the Docker data directory (``/var/lib/docker``) and for ``/tmp``.
+TMPDIR and the data directory can be set like this:
 
-  ``TMPDIR=$(readlink -f /tmp) /usr/local/bin/docker -d -D -g $(readlink -f /var/lib/docker) -H unix:// $EXPOSE_ALL > /var/lib/boot2docker/docker.log 2>&1``
+::
+
+    TMPDIR=/mnt/disk2/tmp /usr/local/bin/docker -d -D -g /var/lib/docker -H unix:// > /var/lib/boot2docker/docker.log 2>&1
+    # or
+    export TMPDIR=/mnt/disk2/tmp
+    /usr/local/bin/docker -d -D -g /var/lib/docker -H unix:// > /var/lib/boot2docker/docker.log 2>&1
 
 .. _cli_attach:
 
@@ -517,7 +528,7 @@ For example:
     Show the history of an image
 
       --no-trunc=false: Don't truncate output
-      -q, --quiet=false: only show numeric IDs
+      -q, --quiet=false: Only show numeric IDs
 
 To see how the ``docker:latest`` image was built:
 
@@ -564,11 +575,11 @@ To see how the ``docker:latest`` image was built:
 
     List images
 
-      -a, --all=false: show all images (by default filter out the intermediate images used to build)
+      -a, --all=false: Show all images (by default filter out the intermediate images used to build)
       --no-trunc=false: Don't truncate output
-      -q, --quiet=false: only show numeric IDs
-      --tree=false: output graph in tree format
-      --viz=false: output graph in graphviz format
+      -q, --quiet=false: Only show numeric IDs
+      --tree=false: Output graph in tree format
+      --viz=false: Output graph in graphviz format
 
 Listing the most recently created images
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -805,6 +816,19 @@ we ask for the ``HostPort`` field to get the public address.
 
     $ sudo docker inspect -format='{{(index (index .NetworkSettings.Ports "8787/tcp") 0).HostPort}}' $INSTANCE_ID
 
+Get config
+..........
+
+The ``.Field`` syntax doesn't work when the field contains JSON data,
+but the template language's custom ``json`` function does. The ``.config``
+section contains complex json object, so to grab it as JSON, you use ``json``
+to convert config object into JSON
+
+.. code-block:: bash
+
+    $ sudo docker inspect -format='{{json .config}}' $INSTANCE_ID
+
+
 .. _cli_kill:
 
 ``kill``
@@ -851,9 +875,9 @@ Known Issues (kill)
 
     Register or Login to the docker registry server
 
-    -e, --email="": email
-    -p, --password="": password
-    -u, --username="": username
+    -e, --email="": Email
+    -p, --password="": Password
+    -u, --username="": Username
 
     If you want to login to a private registry you can
     specify this by adding the server name.
@@ -971,7 +995,8 @@ The last container is marked as a ``Ghost`` container. It is a container that wa
     Usage: docker rm [OPTIONS] CONTAINER
 
     Remove one or more containers
-        --link="": Remove the link instead of the actual container
+        -l, --link="": Remove the link instead of the actual container
+        -f, --force=false: Force removal of running container
 
 Known Issues (rm)
 ~~~~~~~~~~~~~~~~~

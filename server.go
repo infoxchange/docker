@@ -29,10 +29,6 @@ import (
 	"time"
 )
 
-func (srv *Server) Close() error {
-	return srv.runtime.Close()
-}
-
 // jobInitApi runs the remote api server `srv` as a daemon,
 // Only one api server can run at the same time - this is enforced by a pidfile.
 // The signals SIGINT, SIGQUIT and SIGTERM are intercepted for cleanup.
@@ -1331,7 +1327,12 @@ func (srv *Server) ImagePull(job *engine.Job) engine.Status {
 	defer srv.poolRemove("pull", localName+":"+tag)
 
 	// Resolve the Repository name from fqn to endpoint + name
-	endpoint, remoteName, err := registry.ResolveRepositoryName(localName)
+	hostname, remoteName, err := registry.ResolveRepositoryName(localName)
+	if err != nil {
+		return job.Error(err)
+	}
+
+	endpoint, err := registry.ExpandAndVerifyRegistryUrl(hostname)
 	if err != nil {
 		return job.Error(err)
 	}
@@ -1534,7 +1535,12 @@ func (srv *Server) ImagePush(job *engine.Job) engine.Status {
 	defer srv.poolRemove("push", localName)
 
 	// Resolve the Repository name from fqn to endpoint + name
-	endpoint, remoteName, err := registry.ResolveRepositoryName(localName)
+	hostname, remoteName, err := registry.ResolveRepositoryName(localName)
+	if err != nil {
+		return job.Error(err)
+	}
+
+	endpoint, err := registry.ExpandAndVerifyRegistryUrl(hostname)
 	if err != nil {
 		return job.Error(err)
 	}
@@ -1669,7 +1675,7 @@ func (srv *Server) ContainerCreate(job *engine.Job) engine.Status {
 		job.Printf("%s\n", container.ID)
 	}
 	for _, warning := range buildWarnings {
-		return job.Errorf("%s\n", warning)
+		job.Errorf("%s\n", warning)
 	}
 	return engine.StatusOK
 }
@@ -1703,6 +1709,7 @@ func (srv *Server) ContainerDestroy(job *engine.Job) engine.Status {
 	name := job.Args[0]
 	removeVolume := job.GetenvBool("removeVolume")
 	removeLink := job.GetenvBool("removeLink")
+	forceRemove := job.GetenvBool("forceRemove")
 
 	container := srv.runtime.Get(name)
 
@@ -1740,7 +1747,13 @@ func (srv *Server) ContainerDestroy(job *engine.Job) engine.Status {
 
 	if container != nil {
 		if container.State.IsRunning() {
-			return job.Errorf("Impossible to remove a running container, please stop it first")
+			if forceRemove {
+				if err := container.Stop(5); err != nil {
+					return job.Errorf("Could not stop running container, cannot remove - %v", err)
+				}
+			} else {
+				return job.Errorf("Impossible to remove a running container, please stop it first or use -f")
+			}
 		}
 		if err := srv.runtime.Destroy(container); err != nil {
 			return job.Errorf("Cannot destroy container %s: %s", name, err)
@@ -2313,6 +2326,7 @@ func NewServer(eng *engine.Engine, config *DaemonConfig) (*Server, error) {
 		pushingPool: make(map[string]chan struct{}),
 		events:      make([]utils.JSONMessage, 0, 64), //only keeps the 64 last events
 		listeners:   make(map[string]chan utils.JSONMessage),
+		running:     true,
 	}
 	runtime.srv = srv
 	return srv, nil
@@ -2362,6 +2376,24 @@ func (srv *Server) GetEvents() []utils.JSONMessage {
 	return srv.events
 }
 
+func (srv *Server) SetRunning(status bool) {
+	srv.Lock()
+	defer srv.Unlock()
+
+	srv.running = status
+}
+
+func (srv *Server) IsRunning() bool {
+	srv.RLock()
+	defer srv.RUnlock()
+	return srv.running
+}
+
+func (srv *Server) Close() error {
+	srv.SetRunning(false)
+	return srv.runtime.Close()
+}
+
 type Server struct {
 	sync.RWMutex
 	runtime     *Runtime
@@ -2370,4 +2402,5 @@ type Server struct {
 	events      []utils.JSONMessage
 	listeners   map[string]chan utils.JSONMessage
 	Eng         *engine.Engine
+	running     bool
 }
